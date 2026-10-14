@@ -38,6 +38,21 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .ex-card.done .checkbtn{background:var(--green);border-color:var(--green);color:#000}
 .ex-name{font-weight:700;font-size:14px;color:var(--text)}
 .ex-meta{font-size:11px;color:var(--muted);margin-top:3px}
+.ex-swapped{font-size:11px;color:var(--blue);margin-top:2px}
+.swap-btn{background:var(--card2);border:1px solid var(--border);border-radius:10px;width:34px;height:34px;font-size:15px;cursor:pointer;flex-shrink:0}
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:300;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--card);border-top-left-radius:22px;border-top-right-radius:22px;padding:22px 20px 30px;width:100%;max-width:600px;border:1px solid var(--border)}
+.sheet h3{font-size:18px;margin-bottom:4px;color:var(--text)}
+.sheet-sub{font-size:12px;color:var(--muted)}
+.chip-row{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 10px}
+.chip{background:var(--card2);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.chip.sel,.scope-btn.sel{border-color:var(--accent);color:var(--accent)}
+.swap-input{width:100%;margin-top:14px;padding:11px 12px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--card2);color:var(--text);font-family:inherit}
+.chip-row+.swap-input{margin-top:0}
+.scope-row{display:flex;gap:8px;margin-top:12px}
+.scope-btn{flex:1;background:var(--card2);border:1px solid var(--border);color:var(--muted);border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
+.swap-save{background:linear-gradient(135deg,var(--accent),#9c8fff);color:#fff;border:none;padding:14px;border-radius:12px;font-size:14px;font-weight:800;width:100%;margin-top:14px;cursor:pointer}
+.swap-save:disabled{opacity:0.5;cursor:default}
 .log-panel{background:var(--card2);padding:12px 14px;border-top:1px solid var(--border)}
 .set-row{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:8px}
 .set-row:last-child{margin-bottom:0}
@@ -112,6 +127,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   </div>
 </div>
 <div class="toast" id="toast"></div>
+<div id="swap-sheet"></div>
 <script>
 const CLIENT_CONFIG = {
   id: 'NITIN_001',
@@ -208,6 +224,13 @@ let activeTab=DAY_KEYS[new Date().getDay()];
 let timerInterval=null;
 let timerState={running:false,phase:'REST',remaining:0,hiitMode:false,hiitIsWork:true};
 
+// Swapped exercises: per session in draft.swaps, "every week" in db.swaps (both keyed by slot id).
+// Lifts are grouped by exercise name so a swapped-in exercise gets its own bests.
+const liftKey=n=>String(n).trim().replace(/\s+/g,' ').toLowerCase();
+const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function slotName(ex,d){return d?.swaps?.[ex.id]||db.swaps?.[ex.id]||ex.name;}
+function savedName(h,id){return h.data?.swaps?.[id]||DAYS.find(d=>d.key===h.day)?.exs.find(e=>e.id===id)?.name||id;}
+
 function save(){try{localStorage.setItem('pms_'+CLIENT_CONFIG.id,JSON.stringify(db));}catch(e){}}
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',2400);}
 
@@ -264,7 +287,8 @@ function render(){
     const isDone=!!draft.done[ex.id];
     const wts=draft.weights[ex.id]||[];
     const rps=draft.reps[ex.id]||[];
-    html+=`<div class="ex-card${isDone?' done':''}${!isToday?' locked':''}"><div class="ex-top" onclick="toggleEx('${day.key}','${ex.id}')"><div class="checkbtn">${isDone?'✓':i+1}</div><div style="flex:1"><div class="ex-name">${ex.name}</div><div class="ex-meta">${ex.sets} sets · ${ex.reps} reps</div></div>${isDone?'<span style="font-size:11px;color:var(--green);font-weight:800;letter-spacing:0.5px">DONE ✓</span>':''}</div><div class="log-panel">`;
+    const name=slotName(ex,draft);
+    html+=`<div class="ex-card${isDone?' done':''}${!isToday?' locked':''}"><div class="ex-top" onclick="toggleEx('${day.key}','${ex.id}')"><div class="checkbtn">${isDone?'✓':i+1}</div><div style="flex:1"><div class="ex-name">${esc(name)}</div>${name!==ex.name?`<div class="ex-swapped">🔄 instead of ${esc(ex.name)}</div>`:''}<div class="ex-meta">${ex.sets} sets · ${ex.reps} reps</div></div>${isDone?'<span style="font-size:11px;color:var(--green);font-weight:800;letter-spacing:0.5px">DONE ✓</span>':''}${isToday?`<button class="swap-btn" title="Swap exercise" onclick="event.stopPropagation();openSwap('${day.key}','${ex.id}')">🔄</button>`:''}</div><div class="log-panel">`;
     for(let s=0;s<ex.sets;s++){
       html+=`<div class="set-row"><span class="set-lbl">S${s+1}</span><input class="set-input" type="number" inputmode="decimal" placeholder="kg" value="${wts[s]||''}" onchange="updateWeight('${day.key}','${ex.id}',${s},this.value)"><span class="set-unit">kg</span><input class="set-input" type="number" inputmode="numeric" placeholder="reps" value="${rps[s]||''}" onchange="updateReps('${day.key}','${ex.id}',${s},this.value)"><span class="set-unit">reps</span><button class="rest-btn" onclick="startRestTimer()">⏱ REST</button></div>`;
     }
@@ -298,11 +322,78 @@ function finishWorkout(dk){
   if(!confirm('Save this workout to history?'))return;
   const day=DAYS.find(d=>d.key===dk);
   const dc=Object.values(db.draft[dk]?.done||{}).filter(Boolean).length;
-  db.history.unshift({date:new Date().toLocaleDateString('en-IN'),timestamp:Date.now(),day:dk,type:day?.type||'',focus:day?.focus||'',data:JSON.parse(JSON.stringify(db.draft[dk]||{done:{},weights:{},reps:{}}))});
+  const data=JSON.parse(JSON.stringify(db.draft[dk]||{done:{},weights:{},reps:{}}));
+  // Fix the names into the saved session, including "every week" swaps.
+  const swaps={};(day?.exs||[]).forEach(ex=>{const n=slotName(ex,db.draft[dk]);if(n!==ex.name)swaps[ex.id]=n;});
+  if(Object.keys(swaps).length)data.swaps=swaps;else delete data.swaps;
+  db.history.unshift({date:new Date().toLocaleDateString('en-IN'),timestamp:Date.now(),day:dk,type:day?.type||'',focus:day?.focus||'',data});
   delete db.draft[dk];save();
   showToast('🏆 Beast mode! '+dc+' exercises logged.');
   setTimeout(()=>setTab('history'),1600);
 }
+// ── Swap sheet: pick an exercise used before or type any exercise ──
+let swapState=null;
+function knownNames(){
+  const seen=new Map();const add=n=>{if(n&&!seen.has(liftKey(n)))seen.set(liftKey(n),n.trim());};
+  DAYS.forEach(d=>d.exs.forEach(e=>add(e.name)));
+  Object.values(db.swaps||{}).forEach(add);
+  db.history.forEach(h=>Object.values(h.data?.swaps||{}).forEach(add));
+  return [...seen.values()].sort((a,b)=>a.localeCompare(b));
+}
+function openSwap(dk,id){
+  const ex=DAYS.find(d=>d.key===dk).exs.find(e=>e.id===id);
+  const current=slotName(ex,db.draft[dk]),standing=db.swaps?.[id];
+  const past=[standing,...db.history.map(h=>h.data?.swaps?.[id])];
+  const chips=[ex.name,...past].filter((n,i,a)=>n&&a.findIndex(m=>m&&liftKey(m)===liftKey(n))===i&&liftKey(n)!==liftKey(current));
+  swapState={dk,ex,current,standing,always:false,names:knownNames()};
+  document.getElementById('swap-sheet').innerHTML=`<div class="sheet-bg" onclick="closeSwap()"><div class="sheet" onclick="event.stopPropagation()">
+    <h3>🔄 Swap exercise</h3>
+    <div class="sheet-sub">Planned: <b>${esc(ex.name)}</b>${current!==ex.name?` · today: <b>${esc(current)}</b>`:''}${standing?` · every week: <b>${esc(standing)}</b>`:''}</div>
+    ${chips.length?`<div class="chip-row">${chips.map(n=>`<button class="chip" data-name="${esc(n)}" onclick="pickSwap(this.dataset.name)">${n===ex.name?'↩ ':''}${esc(n)}</button>`).join('')}</div>`:''}
+    <input class="swap-input" id="swap-input" list="swap-names" placeholder="Or type any exercise…" maxlength="60" oninput="updateSwapUI()">
+    <datalist id="swap-names">${swapState.names.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
+    <div class="scope-row"><button class="scope-btn sel" id="scope-today" onclick="setSwapScope(false)">Just today</button><button class="scope-btn" id="scope-always" onclick="setSwapScope(true)">Every week</button></div>
+    <button class="swap-save" id="swap-save" onclick="confirmSwap()">Swap</button>
+    <button class="btn-reset" onclick="closeSwap()">Cancel</button>
+  </div></div>`;
+  updateSwapUI();
+  document.getElementById('swap-input').focus();
+}
+function closeSwap(){swapState=null;document.getElementById('swap-sheet').innerHTML='';}
+function pickSwap(n){document.getElementById('swap-input').value=n;updateSwapUI();}
+function setSwapScope(a){swapState.always=a;updateSwapUI();}
+function swapFinal(){
+  const typed=document.getElementById('swap-input').value.trim().replace(/\s+/g,' ');
+  // Reuse the existing spelling of a known exercise so its history and bests stay together.
+  return swapState.names.find(n=>liftKey(n)===liftKey(typed))||typed;
+}
+function updateSwapUI(){
+  const {ex,current,standing,always}=swapState,f=swapFinal();
+  const unchanged=!f||(liftKey(f)===liftKey(current)&&(!always||liftKey(f)===liftKey(standing||ex.name)));
+  const btn=document.getElementById('swap-save');
+  btn.disabled=unchanged;
+  btn.textContent=f&&liftKey(f)===liftKey(ex.name)?'Back to the planned exercise':'Swap';
+  document.getElementById('scope-today').className='scope-btn'+(always?'':' sel');
+  document.getElementById('scope-always').className='scope-btn'+(always?' sel':'');
+  document.querySelectorAll('#swap-sheet .chip').forEach(c=>c.classList.toggle('sel',!!f&&liftKey(c.dataset.name)===liftKey(f)));
+}
+/** Do another exercise in this slot, for today only or every week. Sets logged for the old exercise are dropped. */
+function confirmSwap(){
+  const {dk,ex,always}=swapState,name=swapFinal();if(!name)return;
+  const cur=db.draft[dk],before=slotName(ex,cur);
+  const logged=[...(cur?.weights?.[ex.id]||[]),...(cur?.reps?.[ex.id]||[])].some(v=>v);
+  if(logged&&liftKey(before)!==liftKey(name)&&!confirm('Clear what you\'ve logged for '+before+'?'))return;
+  const st=db.swaps=db.swaps||{};
+  const d=db.draft[dk]=db.draft[dk]||{done:{},weights:{},reps:{}};
+  const sw=d.swaps=d.swaps||{};
+  if(always){if(liftKey(name)===liftKey(ex.name))delete st[ex.id];else st[ex.id]=name;delete sw[ex.id];}
+  else if(liftKey(name)===liftKey(st[ex.id]||ex.name))delete sw[ex.id];
+  else sw[ex.id]=name;
+  if(liftKey(before)!==liftKey(slotName(ex,d))){delete d.weights[ex.id];delete d.reps[ex.id];delete d.done[ex.id];}
+  save();closeSwap();render();
+  showToast(liftKey(name)===liftKey(ex.name)?'↩ Back to '+ex.name:'🔄 '+name+(always?' — every week':' — today'));
+}
+
 function resetDraft(dk){if(confirm('Clear all entries for this day?')){delete db.draft[dk];save();render();}}
 function deleteHistory(idx,e){e.stopPropagation();if(!confirm('Delete this session?'))return;db.history.splice(idx,1);save();renderHistory(document.getElementById('content-area'));}
 
@@ -373,7 +464,7 @@ function renderHistory(el){
 
       if(!setRows) return '';
       return '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:10px">'
-        +'<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">'+ex.name+'</div>'
+        +'<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">'+esc(savedName(h,ex.id))+'</div>'
         +'<div style="border-top:1px solid var(--border)">'+setRows+'</div>'
         +'</div>';
     }).filter(Boolean).join(''):'';
@@ -416,14 +507,14 @@ function renderProgress(el){
     te+=done.length;
     done.forEach(id=>{const ex=day?.exs.find(e=>e.id===id);if(ex)ts+=ex.sets;});
     Object.keys(s.data?.weights||{}).forEach(id=>{
-      const nm=day?.exs.find(e=>e.id===id)?.name||id;
+      const nm=savedName(s,id),k=liftKey(nm);
       const wts=s.data.weights[id]||[];
       const rps=s.data?.reps?.[id]||[];
       const best=Math.max(...wts.map(w=>parseFloat(w)||0));
       const bi=wts.findIndex(w=>parseFloat(w)===best);
       const br=bi>=0?(parseInt(rps[bi])||0):0;
-      if(!lm[id])lm[id]={name:nm,best:0,bestReps:0};
-      if(best>lm[id].best){lm[id].best=best;lm[id].bestReps=br;}
+      if(!lm[k])lm[k]={name:nm,best:0,bestReps:0};
+      if(best>lm[k].best){lm[k].best=best;lm[k].bestReps=br;}
     });
   });
   const n=db.history.length;
@@ -441,7 +532,7 @@ function renderProgress(el){
     +'<div style="display:flex;align-items:flex-end;justify-content:space-around;height:90px;gap:5px">'
     +vols.map((v,i)=>'<div style="display:flex;flex-direction:column;align-items:center;flex:1;gap:4px"><div style="width:100%;border-radius:5px 5px 0 0;min-height:3px;background:'+(v===Math.max(...vols)?'var(--green)':'var(--accent)')+';height:'+Math.round((v/maxV)*84)+'px;opacity:'+(0.4+0.6*(v/maxV)).toFixed(2)+'"></div><div style="font-size:9px;color:var(--muted)">'+(i+1)+'</div></div>').join('')
     +'</div></div>'
-    +(topLifts.length?'<div class="section-card"><div class="section-title">Top Lifts — Best Weight × Reps</div>'+topLifts.map(l=>'<div class="lift-row"><span class="lift-name">'+l.name+'</span><span class="lift-val">'+l.best+'kg × '+(l.bestReps||'—')+' reps</span></div>').join('')+'</div>':'')
+    +(topLifts.length?'<div class="section-card"><div class="section-title">Top Lifts — Best Weight × Reps</div>'+topLifts.map(l=>'<div class="lift-row"><span class="lift-name">'+esc(l.name)+'</span><span class="lift-val">'+l.best+'kg × '+(l.bestReps||'—')+' reps</span></div>').join('')+'</div>':'')
     +'</div>';
 }
 
