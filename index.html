@@ -49,6 +49,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .chip.sel,.scope-btn.sel{border-color:var(--accent);color:var(--accent)}
 .swap-input{width:100%;margin-top:14px;padding:11px 12px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--card2);color:var(--text);font-family:inherit}
 .chip-row+.swap-input{margin-top:0}
+.field-lbl{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.7px;margin:10px 0 5px}
+.edit-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.edit-grid .swap-input,.field-lbl+.swap-input{margin-top:0}
 .scope-row{display:flex;gap:8px;margin-top:12px}
 .scope-btn{flex:1;background:var(--card2);border:1px solid var(--border);color:var(--muted);border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
 .swap-save{background:linear-gradient(135deg,var(--accent),#9c8fff);color:#fff;border:none;padding:14px;border-radius:12px;font-size:14px;font-weight:800;width:100%;margin-top:14px;cursor:pointer}
@@ -224,12 +227,26 @@ let activeTab=DAY_KEYS[new Date().getDay()];
 let timerInterval=null;
 let timerState={running:false,phase:'REST',remaining:0,hiitMode:false,hiitIsWork:true};
 
-// Swapped exercises: per session in draft.swaps, "every week" in db.swaps (both keyed by slot id).
+// Changed exercises: names in swaps, sets/reps/rest in edits (keyed by slot id) —
+// per session in draft.swaps/draft.edits, "every week" in db.swaps/db.edits.
 // Lifts are grouped by exercise name so a swapped-in exercise gets its own bests.
 const liftKey=n=>String(n).trim().replace(/\s+/g,' ').toLowerCase();
 const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function slotName(ex,d){return d?.swaps?.[ex.id]||db.swaps?.[ex.id]||ex.name;}
-function savedName(h,id){return h.data?.swaps?.[id]||DAYS.find(d=>d.key===h.day)?.exs.find(e=>e.id===id)?.name||id;}
+/** What is actually done in a slot: the plan, then "every week" changes, then this session's changes. */
+function effective(ex,d,standing){
+  return {...ex,...(standing?.edits?.[ex.id]||{}),...(d?.edits?.[ex.id]||{}),name:d?.swaps?.[ex.id]||standing?.swaps?.[ex.id]||ex.name};
+}
+/** Sets / reps / rest in v that differ from base, or null when nothing does. */
+function diffEdit(base,v){
+  const e={};
+  if(v.sets!==base.sets)e.sets=v.sets;
+  if(v.reps!==base.reps)e.reps=v.reps;
+  if(v.rest!==base.rest)e.rest=v.rest;
+  return Object.keys(e).length?e:null;
+}
+const restOf=ex=>ex.rest??CLIENT_CONFIG.restTimer;
+function savedEx(h,id){const ex=DAYS.find(d=>d.key===h.day)?.exs.find(e=>e.id===id);return ex?effective(ex,h.data):null;}
+function savedName(h,id){return savedEx(h,id)?.name||id;}
 
 function save(){try{localStorage.setItem('pms_'+CLIENT_CONFIG.id,JSON.stringify(db));}catch(e){}}
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',2400);}
@@ -277,20 +294,21 @@ function render(){
     return;
   }
 
-  let html=`<div class="content"><div class="day-hero"><div class="day-hero-type">${emoji} ${day.type} <span class="type-badge ${TYPE_BADGE[day.type]||'br'}">${day.type}</span></div><div class="day-hero-title">${day.focus}</div><div class="day-hero-sub">${totalEx} exercises · ${day.exs.reduce((a,e)=>a+e.sets,0)} total sets</div></div><div class="motiv">${day.motiv}</div>`;
+  let html=`<div class="content"><div class="day-hero"><div class="day-hero-type">${emoji} ${day.type} <span class="type-badge ${TYPE_BADGE[day.type]||'br'}">${day.type}</span></div><div class="day-hero-title">${day.focus}</div><div class="day-hero-sub">${totalEx} exercises · ${day.exs.reduce((a,e)=>a+effective(e,draft,db).sets,0)} total sets</div></div><div class="motiv">${day.motiv}</div>`;
 
   html+=`<div class="prog-wrap"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:12px;font-weight:700;color:var(--text)">Session Progress</span><span style="font-size:14px;font-weight:800;color:${pct===100?'var(--green)':'var(--accent)'}">${doneCount} / ${totalEx}</span></div><div class="prog-bar-track"><div class="prog-bar-fill" style="width:${pct}%"></div></div></div>`;
 
   if(!isToday) html+=`<div class="lock-banner">📅 <b>Preview Mode</b> — Logging is only enabled on the scheduled day to keep your history accurate.</div>`;
 
-  day.exs.forEach((ex,i)=>{
+  day.exs.forEach((plan,i)=>{
+    const ex=effective(plan,draft,db),name=ex.name,rest=restOf(ex);
     const isDone=!!draft.done[ex.id];
     const wts=draft.weights[ex.id]||[];
     const rps=draft.reps[ex.id]||[];
-    const name=slotName(ex,draft);
-    html+=`<div class="ex-card${isDone?' done':''}${!isToday?' locked':''}"><div class="ex-top" onclick="toggleEx('${day.key}','${ex.id}')"><div class="checkbtn">${isDone?'✓':i+1}</div><div style="flex:1"><div class="ex-name">${esc(name)}</div>${name!==ex.name?`<div class="ex-swapped">✏️ instead of ${esc(ex.name)}</div>`:''}<div class="ex-meta">${ex.sets} sets · ${ex.reps} reps</div></div>${isDone?'<span style="font-size:11px;color:var(--green);font-weight:800;letter-spacing:0.5px">DONE ✓</span>':''}${isToday?`<button class="swap-btn" title="Change exercise" onclick="event.stopPropagation();openSwap('${day.key}','${ex.id}')">✏️</button>`:''}</div><div class="log-panel">`;
+    const note=name!==plan.name?`✏️ instead of ${esc(plan.name)}`:diffEdit(plan,ex)?`✏️ plan: ${plan.sets} sets · ${esc(plan.reps)} reps · rest ${restOf(plan)}s`:'';
+    html+=`<div class="ex-card${isDone?' done':''}${!isToday?' locked':''}"><div class="ex-top" onclick="toggleEx('${day.key}','${ex.id}')"><div class="checkbtn">${isDone?'✓':i+1}</div><div style="flex:1"><div class="ex-name">${esc(name)}</div>${note?`<div class="ex-swapped">${note}</div>`:''}<div class="ex-meta">${ex.sets} sets · ${esc(ex.reps)} reps · rest ${rest}s</div></div>${isDone?'<span style="font-size:11px;color:var(--green);font-weight:800;letter-spacing:0.5px">DONE ✓</span>':''}${isToday?`<button class="swap-btn" title="Change exercise" onclick="event.stopPropagation();openEdit('${day.key}','${ex.id}')">✏️</button>`:''}</div><div class="log-panel">`;
     for(let s=0;s<ex.sets;s++){
-      html+=`<div class="set-row"><span class="set-lbl">S${s+1}</span><input class="set-input" type="number" inputmode="decimal" placeholder="kg" value="${wts[s]||''}" onchange="updateWeight('${day.key}','${ex.id}',${s},this.value)"><span class="set-unit">kg</span><input class="set-input" type="number" inputmode="numeric" placeholder="reps" value="${rps[s]||''}" onchange="updateReps('${day.key}','${ex.id}',${s},this.value)"><span class="set-unit">reps</span><button class="rest-btn" onclick="startRestTimer()">⏱ REST</button></div>`;
+      html+=`<div class="set-row"><span class="set-lbl">S${s+1}</span><input class="set-input" type="number" inputmode="decimal" placeholder="kg" value="${wts[s]||''}" onchange="updateWeight('${day.key}','${ex.id}',${s},this.value)"><span class="set-unit">kg</span><input class="set-input" type="number" inputmode="numeric" placeholder="reps" value="${rps[s]||''}" onchange="updateReps('${day.key}','${ex.id}',${s},this.value)"><span class="set-unit">reps</span><button class="rest-btn" onclick="startRestTimer(${rest})">⏱ ${rest}s</button></div>`;
     }
     html+=`</div></div>`;
   });
@@ -323,16 +341,18 @@ function finishWorkout(dk){
   const day=DAYS.find(d=>d.key===dk);
   const dc=Object.values(db.draft[dk]?.done||{}).filter(Boolean).length;
   const data=JSON.parse(JSON.stringify(db.draft[dk]||{done:{},weights:{},reps:{}}));
-  // Fix the names into the saved session, including "every week" swaps.
-  const swaps={};(day?.exs||[]).forEach(ex=>{const n=slotName(ex,db.draft[dk]);if(n!==ex.name)swaps[ex.id]=n;});
+  // Fix names, sets, reps and rest into the saved session, including "every week" changes.
+  const swaps={},edits={};
+  (day?.exs||[]).forEach(ex=>{const eff=effective(ex,db.draft[dk],db);if(eff.name!==ex.name)swaps[ex.id]=eff.name;const e=diffEdit(ex,eff);if(e)edits[ex.id]=e;});
   if(Object.keys(swaps).length)data.swaps=swaps;else delete data.swaps;
+  if(Object.keys(edits).length)data.edits=edits;else delete data.edits;
   db.history.unshift({date:new Date().toLocaleDateString('en-IN'),timestamp:Date.now(),day:dk,type:day?.type||'',focus:day?.focus||'',data});
   delete db.draft[dk];save();
   showToast('🏆 Beast mode! '+dc+' exercises logged.');
   setTimeout(()=>setTab('history'),1600);
 }
-// ── Swap sheet: pick an exercise used before or type any exercise ──
-let swapState=null;
+// ── Edit sheet: change the exercise name, sets, reps or rest ──
+let editState=null;
 function knownNames(){
   const seen=new Map();const add=n=>{if(n&&!seen.has(liftKey(n)))seen.set(liftKey(n),n.trim());};
   DAYS.forEach(d=>d.exs.forEach(e=>add(e.name)));
@@ -340,58 +360,75 @@ function knownNames(){
   db.history.forEach(h=>Object.values(h.data?.swaps||{}).forEach(add));
   return [...seen.values()].sort((a,b)=>a.localeCompare(b));
 }
-function openSwap(dk,id){
-  const ex=DAYS.find(d=>d.key===dk).exs.find(e=>e.id===id);
-  const current=slotName(ex,db.draft[dk]),standing=db.swaps?.[id];
-  const past=[standing,...db.history.map(h=>h.data?.swaps?.[id])];
-  const chips=[ex.name,...past].filter((n,i,a)=>n&&a.findIndex(m=>m&&liftKey(m)===liftKey(n))===i&&liftKey(n)!==liftKey(current));
-  swapState={dk,ex,current,standing,always:false,names:knownNames()};
-  document.getElementById('swap-sheet').innerHTML=`<div class="sheet-bg" onclick="closeSwap()"><div class="sheet" onclick="event.stopPropagation()">
-    <h3>✏️ Change exercise</h3>
-    <div class="sheet-sub">Planned: <b>${esc(ex.name)}</b>${current!==ex.name?` · today: <b>${esc(current)}</b>`:''}${standing?` · every week: <b>${esc(standing)}</b>`:''}</div>
-    ${chips.length?`<div class="chip-row">${chips.map(n=>`<button class="chip" data-name="${esc(n)}" onclick="pickSwap(this.dataset.name)">${n===ex.name?'↩ ':''}${esc(n)}</button>`).join('')}</div>`:''}
-    <input class="swap-input" id="swap-input" list="swap-names" placeholder="Type the exercise name" maxlength="60" value="${esc(current)}" oninput="updateSwapUI()">
-    <datalist id="swap-names">${swapState.names.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
-    <div class="scope-row"><button class="scope-btn sel" id="scope-today" onclick="setSwapScope(false)">Just today</button><button class="scope-btn" id="scope-always" onclick="setSwapScope(true)">Every week</button></div>
-    <button class="swap-save" id="swap-save" onclick="confirmSwap()">Save</button>
-    <button class="btn-reset" onclick="closeSwap()">Cancel</button>
+const sameSlot=(a,b)=>liftKey(a.name)===liftKey(b.name)&&a.sets===b.sets&&a.reps===b.reps&&a.rest===b.rest;
+function openEdit(dk,id){
+  const plan=DAYS.find(d=>d.key===dk).exs.find(e=>e.id===id);
+  const current=effective(plan,db.draft[dk],db),standing=effective(plan,null,db);
+  const past=[db.swaps?.[id],...db.history.map(h=>h.data?.swaps?.[id])];
+  const chips=[plan.name,...past].filter((n,i,a)=>n&&a.findIndex(m=>m&&liftKey(m)===liftKey(n))===i&&liftKey(n)!==liftKey(current.name));
+  editState={dk,plan,current,standing,always:false,names:knownNames()};
+  const changed=!sameSlot(current,plan)||!sameSlot(standing,plan);
+  document.getElementById('swap-sheet').innerHTML=`<div class="sheet-bg" onclick="closeEdit()"><div class="sheet" onclick="event.stopPropagation()">
+    <h3>✏️ Edit exercise</h3>
+    <div class="sheet-sub">Planned: <b>${esc(plan.name)}</b> · ${plan.sets} × ${esc(plan.reps)} · rest ${restOf(plan)}s</div>
+    ${chips.length?`<div class="chip-row">${chips.map(n=>`<button class="chip" data-name="${esc(n)}" onclick="pickName(this.dataset.name)">${n===plan.name?'↩ ':''}${esc(n)}</button>`).join('')}</div>`:''}
+    <label class="field-lbl">Exercise</label>
+    <input class="swap-input" id="ed-name" list="swap-names" placeholder="Type the exercise name" maxlength="60" value="${esc(current.name)}" oninput="updateEditUI()">
+    <datalist id="swap-names">${editState.names.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
+    <div class="edit-grid">
+      <div><label class="field-lbl">Sets</label><input class="swap-input" id="ed-sets" type="number" inputmode="numeric" min="1" max="20" value="${current.sets}" oninput="updateEditUI()"></div>
+      <div><label class="field-lbl">Reps</label><input class="swap-input" id="ed-reps" maxlength="20" value="${esc(current.reps)}" oninput="updateEditUI()"></div>
+      <div><label class="field-lbl">Rest (sec)</label><input class="swap-input" id="ed-rest" type="number" inputmode="numeric" min="0" max="600" placeholder="${CLIENT_CONFIG.restTimer}" value="${current.rest??''}" oninput="updateEditUI()"></div>
+    </div>
+    <div class="scope-row"><button class="scope-btn sel" id="scope-today" onclick="setEditScope(false)">Just today</button><button class="scope-btn" id="scope-always" onclick="setEditScope(true)">Every week</button></div>
+    <button class="swap-save" id="ed-save" onclick="confirmEdit(false)">Save</button>
+    ${changed?`<button class="btn-draft" onclick="confirmEdit(true)">↩ Reset to the plan</button>`:''}
+    <button class="btn-reset" onclick="closeEdit()">Cancel</button>
   </div></div>`;
-  updateSwapUI();
-  document.getElementById('swap-input').focus();document.getElementById('swap-input').select();
+  updateEditUI();
 }
-function closeSwap(){swapState=null;document.getElementById('swap-sheet').innerHTML='';}
-function pickSwap(n){document.getElementById('swap-input').value=n;updateSwapUI();}
-function setSwapScope(a){swapState.always=a;updateSwapUI();}
-function swapFinal(){
-  const typed=document.getElementById('swap-input').value.trim().replace(/\s+/g,' ');
-  // Reuse the existing spelling of a known exercise so its history and bests stay together.
-  return swapState.names.find(n=>liftKey(n)===liftKey(typed))||typed;
+function closeEdit(){editState=null;document.getElementById('swap-sheet').innerHTML='';}
+function pickName(n){document.getElementById('ed-name').value=n;updateEditUI();}
+function setEditScope(a){editState.always=a;updateEditUI();}
+function editValues(){
+  const {plan,names}=editState,val=id=>document.getElementById(id).value;
+  const typed=val('ed-name').trim().replace(/\s+/g,' '),sets=parseInt(val('ed-sets')),rest=parseInt(val('ed-rest'));
+  return {
+    // Reuse the existing spelling of a known exercise so its history and bests stay together.
+    name:names.find(n=>liftKey(n)===liftKey(typed))||typed,
+    sets:Math.min(20,Math.max(1,sets||plan.sets)),
+    reps:val('ed-reps').trim()||plan.reps,
+    rest:rest>=0?Math.min(600,rest):plan.rest,
+  };
 }
-function updateSwapUI(){
-  const {ex,current,standing,always}=swapState,f=swapFinal();
-  const unchanged=!f||(liftKey(f)===liftKey(current)&&(!always||liftKey(f)===liftKey(standing||ex.name)));
-  const btn=document.getElementById('swap-save');
-  btn.disabled=unchanged;
-  btn.textContent=f&&liftKey(f)===liftKey(ex.name)?'Back to the planned exercise':'Save';
+function updateEditUI(){
+  const {current,standing,always}=editState,v=editValues();
+  document.getElementById('ed-save').disabled=!v.name||(sameSlot(v,current)&&(!always||sameSlot(v,standing)));
   document.getElementById('scope-today').className='scope-btn'+(always?'':' sel');
   document.getElementById('scope-always').className='scope-btn'+(always?' sel':'');
-  document.querySelectorAll('#swap-sheet .chip').forEach(c=>c.classList.toggle('sel',!!f&&liftKey(c.dataset.name)===liftKey(f)));
+  document.querySelectorAll('#swap-sheet .chip').forEach(c=>c.classList.toggle('sel',!!v.name&&liftKey(c.dataset.name)===liftKey(v.name)));
 }
-/** Do another exercise in this slot, for today only or every week. Sets logged for the old exercise are dropped. */
-function confirmSwap(){
-  const {dk,ex,always}=swapState,name=swapFinal();if(!name)return;
-  const cur=db.draft[dk],before=slotName(ex,cur);
-  const logged=[...(cur?.weights?.[ex.id]||[]),...(cur?.reps?.[ex.id]||[])].some(v=>v);
-  if(logged&&liftKey(before)!==liftKey(name)&&!confirm('Clear what you\'ve logged for '+before+'?'))return;
-  const st=db.swaps=db.swaps||{};
+/** Change the exercise, sets, reps or rest in this slot, for today only or every week (reset = back to the plan). */
+function confirmEdit(reset){
+  const {dk,plan}=editState,always=reset||editState.always,v=reset?plan:editValues();if(!v.name)return;
+  const cur=db.draft[dk],before=effective(plan,cur,db);
+  const renamed=liftKey(before.name)!==liftKey(v.name);
+  const logged=[...(cur?.weights?.[plan.id]||[]),...(cur?.reps?.[plan.id]||[])].some(x=>x);
+  if(logged&&renamed&&!confirm('Clear what you\'ve logged for '+before.name+'?'))return;
+  db.swaps=db.swaps||{};db.edits=db.edits||{};
   const d=db.draft[dk]=db.draft[dk]||{done:{},weights:{},reps:{}};
-  const sw=d.swaps=d.swaps||{};
-  if(always){if(liftKey(name)===liftKey(ex.name))delete st[ex.id];else st[ex.id]=name;delete sw[ex.id];}
-  else if(liftKey(name)===liftKey(st[ex.id]||ex.name))delete sw[ex.id];
-  else sw[ex.id]=name;
-  if(liftKey(before)!==liftKey(slotName(ex,d))){delete d.weights[ex.id];delete d.reps[ex.id];delete d.done[ex.id];}
-  save();closeSwap();render();
-  showToast(liftKey(name)===liftKey(ex.name)?'↩ Back to '+ex.name:'✅ Saved: '+name+(always?' (every week)':' (today)'));
+  d.swaps=d.swaps||{};d.edits=d.edits||{};
+  // "Every week" is stored relative to the plan; "just today" relative to the every-week version.
+  const base=always?plan:effective(plan,null,db);
+  const name=liftKey(v.name)===liftKey(base.name)?null:v.name,e=diffEdit(base,v);
+  const [nameMap,editMap]=always?[db.swaps,db.edits]:[d.swaps,d.edits];
+  if(name)nameMap[plan.id]=name;else delete nameMap[plan.id];
+  if(e)editMap[plan.id]=e;else delete editMap[plan.id];
+  if(always){delete d.swaps[plan.id];delete d.edits[plan.id];}
+  if(renamed){delete d.weights[plan.id];delete d.reps[plan.id];delete d.done[plan.id];}
+  else{d.weights[plan.id]?.splice(v.sets);d.reps[plan.id]?.splice(v.sets);} // fewer sets: drop the removed ones
+  save();closeEdit();render();
+  showToast(reset?'↩ Back to the plan':'✅ Saved'+(always?' for every week':' for today'));
 }
 
 function resetDraft(dk){if(confirm('Clear all entries for this day?')){delete db.draft[dk];save();render();}}
@@ -407,7 +444,7 @@ function syncTimerUI(){
     if(hb)hb.className='tbtn'+(timerState.hiitMode?' hiit-active':'');
   } else ov.style.display='none';
 }
-function startRestTimer(){timerState.hiitMode=false;runCountdown(CLIENT_CONFIG.restTimer,'REST');}
+function startRestTimer(sec){timerState.hiitMode=false;runCountdown(sec||CLIENT_CONFIG.restTimer,'REST');}
 function runCountdown(sec,phase){
   clearInterval(timerInterval);
   Object.assign(timerState,{running:true,phase,remaining:sec});
@@ -441,10 +478,11 @@ function renderHistory(el){
     const day=DAYS.find(d=>d.key===h.day);
     const done=Object.keys(h.data?.done||{}).filter(k=>h.data.done[k]);
     const vol=calcVol(h);
-    const ts=done.reduce((a,id)=>{const ex=day?.exs.find(e=>e.id===id);return a+(ex?ex.sets:0);},0);
+    const ts=done.reduce((a,id)=>a+(savedEx(h,id)?.sets||0),0);
 
     // Build clean vertical cards per exercise
-    const det=day?day.exs.filter(ex=>h.data?.done?.[ex.id]).map(ex=>{
+    const det=day?day.exs.filter(ex=>h.data?.done?.[ex.id]).map(plan=>{
+      const ex=effective(plan,h.data);
       const wts=h.data?.weights?.[ex.id]||[];
       const rps=h.data?.reps?.[ex.id]||[];
       // Only show sets that have at least weight or reps entered
@@ -505,7 +543,7 @@ function renderProgress(el){
     const day=DAYS.find(d=>d.key===s.day);
     const done=Object.keys(s.data?.done||{}).filter(k=>s.data.done[k]);
     te+=done.length;
-    done.forEach(id=>{const ex=day?.exs.find(e=>e.id===id);if(ex)ts+=ex.sets;});
+    done.forEach(id=>{ts+=savedEx(s,id)?.sets||0;});
     Object.keys(s.data?.weights||{}).forEach(id=>{
       const nm=savedName(s,id),k=liftKey(nm);
       const wts=s.data.weights[id]||[];
