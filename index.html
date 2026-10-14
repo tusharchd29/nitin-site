@@ -288,7 +288,7 @@ function render(){
     const wts=draft.weights[ex.id]||[];
     const rps=draft.reps[ex.id]||[];
     const name=slotName(ex,draft);
-    html+=`<div class="ex-card${isDone?' done':''}${!isToday?' locked':''}"><div class="ex-top" onclick="toggleEx('${day.key}','${ex.id}')"><div class="checkbtn">${isDone?'✓':i+1}</div><div style="flex:1"><div class="ex-name">${esc(name)}</div>${name!==ex.name?`<div class="ex-swapped">🔄 instead of ${esc(ex.name)}</div>`:''}<div class="ex-meta">${ex.sets} sets · ${ex.reps} reps</div></div>${isDone?'<span style="font-size:11px;color:var(--green);font-weight:800;letter-spacing:0.5px">DONE ✓</span>':''}${isToday?`<button class="swap-btn" title="Swap exercise" onclick="event.stopPropagation();openSwap('${day.key}','${ex.id}')">🔄</button>`:''}</div><div class="log-panel">`;
+    html+=`<div class="ex-card${isDone?' done':''}${!isToday?' locked':''}"><div class="ex-top" onclick="toggleEx('${day.key}','${ex.id}')"><div class="checkbtn">${isDone?'✓':i+1}</div><div style="flex:1"><div class="ex-name">${esc(name)}</div>${name!==ex.name?`<div class="ex-swapped">✏️ instead of ${esc(ex.name)}</div>`:''}<div class="ex-meta">${ex.sets} sets · ${ex.reps} reps</div></div>${isDone?'<span style="font-size:11px;color:var(--green);font-weight:800;letter-spacing:0.5px">DONE ✓</span>':''}${isToday?`<button class="swap-btn" title="Change exercise" onclick="event.stopPropagation();openSwap('${day.key}','${ex.id}')">✏️</button>`:''}</div><div class="log-panel">`;
     for(let s=0;s<ex.sets;s++){
       html+=`<div class="set-row"><span class="set-lbl">S${s+1}</span><input class="set-input" type="number" inputmode="decimal" placeholder="kg" value="${wts[s]||''}" onchange="updateWeight('${day.key}','${ex.id}',${s},this.value)"><span class="set-unit">kg</span><input class="set-input" type="number" inputmode="numeric" placeholder="reps" value="${rps[s]||''}" onchange="updateReps('${day.key}','${ex.id}',${s},this.value)"><span class="set-unit">reps</span><button class="rest-btn" onclick="startRestTimer()">⏱ REST</button></div>`;
     }
@@ -347,17 +347,17 @@ function openSwap(dk,id){
   const chips=[ex.name,...past].filter((n,i,a)=>n&&a.findIndex(m=>m&&liftKey(m)===liftKey(n))===i&&liftKey(n)!==liftKey(current));
   swapState={dk,ex,current,standing,always:false,names:knownNames()};
   document.getElementById('swap-sheet').innerHTML=`<div class="sheet-bg" onclick="closeSwap()"><div class="sheet" onclick="event.stopPropagation()">
-    <h3>🔄 Swap exercise</h3>
+    <h3>✏️ Change exercise</h3>
     <div class="sheet-sub">Planned: <b>${esc(ex.name)}</b>${current!==ex.name?` · today: <b>${esc(current)}</b>`:''}${standing?` · every week: <b>${esc(standing)}</b>`:''}</div>
     ${chips.length?`<div class="chip-row">${chips.map(n=>`<button class="chip" data-name="${esc(n)}" onclick="pickSwap(this.dataset.name)">${n===ex.name?'↩ ':''}${esc(n)}</button>`).join('')}</div>`:''}
-    <input class="swap-input" id="swap-input" list="swap-names" placeholder="Or type any exercise…" maxlength="60" oninput="updateSwapUI()">
+    <input class="swap-input" id="swap-input" list="swap-names" placeholder="Type the exercise name" maxlength="60" value="${esc(current)}" oninput="updateSwapUI()">
     <datalist id="swap-names">${swapState.names.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
     <div class="scope-row"><button class="scope-btn sel" id="scope-today" onclick="setSwapScope(false)">Just today</button><button class="scope-btn" id="scope-always" onclick="setSwapScope(true)">Every week</button></div>
-    <button class="swap-save" id="swap-save" onclick="confirmSwap()">Swap</button>
+    <button class="swap-save" id="swap-save" onclick="confirmSwap()">Save</button>
     <button class="btn-reset" onclick="closeSwap()">Cancel</button>
   </div></div>`;
   updateSwapUI();
-  document.getElementById('swap-input').focus();
+  document.getElementById('swap-input').focus();document.getElementById('swap-input').select();
 }
 function closeSwap(){swapState=null;document.getElementById('swap-sheet').innerHTML='';}
 function pickSwap(n){document.getElementById('swap-input').value=n;updateSwapUI();}
@@ -372,7 +372,7 @@ function updateSwapUI(){
   const unchanged=!f||(liftKey(f)===liftKey(current)&&(!always||liftKey(f)===liftKey(standing||ex.name)));
   const btn=document.getElementById('swap-save');
   btn.disabled=unchanged;
-  btn.textContent=f&&liftKey(f)===liftKey(ex.name)?'Back to the planned exercise':'Swap';
+  btn.textContent=f&&liftKey(f)===liftKey(ex.name)?'Back to the planned exercise':'Save';
   document.getElementById('scope-today').className='scope-btn'+(always?'':' sel');
   document.getElementById('scope-always').className='scope-btn'+(always?' sel':'');
   document.querySelectorAll('#swap-sheet .chip').forEach(c=>c.classList.toggle('sel',!!f&&liftKey(c.dataset.name)===liftKey(f)));
@@ -391,7 +391,7 @@ function confirmSwap(){
   else sw[ex.id]=name;
   if(liftKey(before)!==liftKey(slotName(ex,d))){delete d.weights[ex.id];delete d.reps[ex.id];delete d.done[ex.id];}
   save();closeSwap();render();
-  showToast(liftKey(name)===liftKey(ex.name)?'↩ Back to '+ex.name:'🔄 '+name+(always?' — every week':' — today'));
+  showToast(liftKey(name)===liftKey(ex.name)?'↩ Back to '+ex.name:'✅ Saved: '+name+(always?' (every week)':' (today)'));
 }
 
 function resetDraft(dk){if(confirm('Clear all entries for this day?')){delete db.draft[dk];save();render();}}
