@@ -204,7 +204,7 @@ const TYPE_EMOJI={Push:'🔥',Pull:'💪',Legs:'🦵',Core:'⚡',Rest:'😴'};
 
 let db={history:[],draft:{},schema:4};
 try{const r=localStorage.getItem('pms_'+CLIENT_CONFIG.id);if(r)db=JSON.parse(r);}catch(e){}
-let activeTab=DAYS[new Date().getDay()]?.key||'mon';
+let activeTab=DAY_KEYS[new Date().getDay()];
 let timerInterval=null;
 let timerState={running:false,phase:'REST',remaining:0,hiitMode:false,hiitIsWork:true};
 
